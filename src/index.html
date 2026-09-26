@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en" translate="no" class="notranslate no-js">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="{{CSP}}">
+<meta name="referrer" content="no-referrer">
+<meta name="google" content="notranslate">
+<meta name="format-detection" content="telephone=no, date=no, email=no, address=no">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b0c0e">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#f5f3ee">
+<meta name="description" content="All 2048 BIP39 English words in a scroll-only picker. No search box, nothing to tap, nothing typed, saved or sent.">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="BIP39">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>BIP39 Wordlist</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<style>{{STYLE}}</style>
+</head>
+<body>
+<div class="app" id="app">
+<div class="lens" aria-hidden="true"><span class="lens__bits" id="bits"></span></div>
+<main class="list" id="list" tabindex="0" aria-label="BIP39 English wordlist, 2048 words" data-sha256="{{SHA256}}">
+<header class="intro">
+<p class="intro__kicker">BIP39 · English wordlist</p>
+<h1 class="intro__title">Find a word by scrolling.</h1>
+<p class="intro__text">All 2048 words, A to Z. No search box and nothing to tap, so what you look for is never typed, saved or sent.</p>
+<p class="intro__hint">Scroll the list for words. Scroll the letter strip <span aria-hidden="true">→</span> to jump between first letters.</p>
+</header>
+{{LIST}}
+<footer class="outro">
+<p class="outro__end">End of list · 2048 words</p>
+<p class="outro__verify" id="verify" data-state="pending">Checking the list…</p>
+<dl class="outro__facts">
+<div class="outro__fact"><dt>SHA-256</dt><dd class="outro__hash">{{SHA256_GROUPED}}</dd></div>
+<div class="outro__fact"><dt>Source</dt><dd>github.com/bitcoin/bips · bip-0039/english.txt</dd></div>
+<div class="outro__fact"><dt>Privacy</dt><dd>No inputs, cookies, analytics or third-party requests. Your position is never saved. Works offline once loaded.</dd></div>
+<div class="outro__fact"><dt>Code</dt><dd>github.com/ilyacoding/bip39-viewer</dd></div>
+</dl>
+</footer>
+</main>
+<div class="reel" id="reel" tabindex="-1" aria-hidden="true"><div class="reel__track" id="reelTrack">{{REEL}}</div></div>
+<div class="fade fade--top" aria-hidden="true"></div>
+<div class="fade fade--bottom" aria-hidden="true"></div>
+<div class="alarm" id="alarm" role="alert" hidden>This page's wordlist does not match the official BIP39 English list. Do not use it.</div>
+</div>
+<script>{{SCRIPT}}</script>
+</body>
+</html>
