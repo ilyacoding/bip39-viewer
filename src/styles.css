@@ -22,9 +22,9 @@
   --accent-rgb: 247 147 26;
   --ink-rgb: 236 234 228;
 
-  --hair: rgb(var(--ink-rgb) / .08);           /* .w--g hairline: translucent so it never cuts the lens lines */
-  --lens-fill: rgb(var(--accent-rgb) / .07);
-  --lens-edge: rgb(var(--accent-rgb) / .45);
+  --hair: rgb(var(--ink-rgb) / .08);           /* .w--g hairline */
+  --mark-fill: rgb(var(--accent-rgb) / .07);   /* reel window behind the centre letter */
+  --mark-edge: rgb(var(--accent-rgb) / .45);
   --track: rgb(var(--ink-rgb) / .04);
   --track-edge: rgb(var(--ink-rgb) / .075);
   --track-on: rgb(var(--ink-rgb) / .07);
@@ -70,8 +70,8 @@
     --ink-rgb: 22 23 26;
 
     --hair: rgb(var(--ink-rgb) / .09);
-    --lens-fill: rgb(var(--accent-rgb) / .065);
-    --lens-edge: rgb(var(--accent-rgb) / .4);
+    --mark-fill: rgb(var(--accent-rgb) / .065);
+    --mark-edge: rgb(var(--accent-rgb) / .4);
     --track: rgb(var(--ink-rgb) / .035);
     --track-edge: rgb(var(--ink-rgb) / .07);
     --track-on: rgb(var(--ink-rgb) / .06);
@@ -137,42 +137,6 @@ b {
 .app {
   position: fixed;
   inset: 0;
-}
-
-/* ---------- lens: fixed band at the exact vertical center, behind the list ---------- */
-
-.lens {
-  position: fixed;
-  z-index: 0;
-  top: 50%;
-  height: var(--row);
-  transform: translateY(-50%);
-  /* spans the column including the reel */
-  left: calc(env(safe-area-inset-left, 0px)
-    + max(0px, (100% - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px) - var(--col)) / 2));
-  right: calc(env(safe-area-inset-right, 0px)
-    + max(0px, (100% - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px) - var(--col)) / 2));
-  pointer-events: none;
-}
-
-.lens::before {
-  content: "";
-  position: absolute;
-  inset: 0 8px;
-  border-radius: 12px;
-  background: var(--lens-fill);
-  box-shadow: inset 0 0 0 1px var(--lens-edge);
-}
-
-.lens__bits {
-  position: absolute;
-  top: 0;
-  right: calc(var(--reel-w) + 8px);
-  height: var(--row);
-  font: 500 11px/var(--row) var(--mono);
-  letter-spacing: .08em;
-  color: var(--ink-3);
-  white-space: nowrap;
 }
 
 /* ---------- list: the word scroller (full viewport, transparent) ---------- */
@@ -241,7 +205,8 @@ b {
   padding: 0;
 }
 
-/* word row: exactly var(--row), snaps to the lens center; no transforms, no margins */
+/* word row: exactly var(--row), snaps to the viewport centre; no transforms, no margins.
+   Every row renders the same wherever it sits: nothing marks the word at the centre. */
 .w {
   display: block;
   height: var(--row);
@@ -268,38 +233,24 @@ b {
   font-variant-numeric: tabular-nums;
   letter-spacing: .02em;
   color: var(--ink-3);
-  transition: color .1s linear;
 }
 
 .w__t {
   color: var(--ink-2);
   font-variant-ligatures: none;
   font-kerning: none;
-  transition: color .1s linear;
 }
 
 .w__t b {
   font-weight: 600;
   color: var(--ink);
-  transition: color .1s linear;
 }
 
-.w.is-active .w__t,
-.w.is-active .w__t b {
-  color: var(--accent);
-}
+/* ---------- intro (top spacer: abandon sits at the centre at scrollTop 0) ---------- */
 
-.w.is-active .w__n {
-  color: var(--ink-2);
-}
-
-/* ---------- intro (top spacer: abandon sits in the lens at scrollTop 0) ---------- */
-
-/* Intro and outro are opaque, so the lens never shows through prose (rows stay transparent).
-   Whenever the intro is on screen the reel sits at "A" with nothing above the lens, so the prose
+/* Whenever the intro is on screen the reel sits at "A" with nothing above its centre, so the prose
    may use the full column width. Integer line-heights keep the geometry on whole pixels. */
 .intro {
-  background: var(--bg);
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
@@ -348,7 +299,6 @@ b {
 /* ---------- outro ---------- */
 
 .outro {
-  background: var(--bg);
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
@@ -386,6 +336,16 @@ b {
   color: var(--bad);
   background: rgb(var(--bad-rgb) / .1);
   box-shadow: inset 0 0 0 1px rgb(var(--bad-rgb) / .55);
+}
+
+/* Without JavaScript the check never runs: say so instead of "Checking the list…" forever. */
+.no-js #verify[data-state="pending"] {
+  font-size: 0;
+}
+
+.no-js #verify[data-state="pending"]::after {
+  content: "Not checked: this needs JavaScript. Compare the SHA\2011 256 below with english.txt in bitcoin/bips.";
+  font-size: 14px;
 }
 
 #verify[data-state="unavailable"] {
@@ -440,6 +400,10 @@ b {
   scroll-behavior: auto;
   scrollbar-width: none;
   outline: none;
+  /* window behind the centre letter: a scroller's own background stays put while its content scrolls,
+     so the marker never leaves the reel */
+  background: linear-gradient(var(--mark-edge) 1px, var(--mark-fill) 1px calc(100% - 1px), var(--mark-edge) calc(100% - 1px))
+    center / calc(100% - 16px) var(--notch) no-repeat;
 }
 
 .reel::-webkit-scrollbar {
@@ -480,7 +444,7 @@ b {
   text-align: center;
   font: 600 14px/var(--notch) var(--sans);
   color: var(--ink-2);
-  /* fisheye from --d (distance in notches): 1.5x at the lens, ~0.87x far away */
+  /* fisheye from --d (distance in notches): 1.5x at the centre, ~0.87x far away */
   transform: scale(calc(.86 + .64 / (1 + var(--d, 3) * var(--d, 3))));
   opacity: calc(.45 + .55 / (1 + .45 * var(--d, 3) * var(--d, 3)));
   transition: color .1s linear;
@@ -555,12 +519,6 @@ html.is-framed body {
 
 /* ---------- responsive ---------- */
 
-@media (max-width: 349.98px) {
-  .lens__bits {
-    display: none;
-  }
-}
-
 @media (max-width: 374.98px) {
   :root {
     --gut: 14px;
@@ -575,7 +533,7 @@ html.is-framed body {
   }
 }
 
-/* Height tiers keep the intro short enough that "abandon" starts in the lens on real phone
+/* Height tiers keep the intro short enough that "abandon" starts at the centre on real phone
    viewports (browser toolbars included). If it still does not fit, abandon simply starts lower. */
 @media (max-height: 759.98px) {
   :root {
@@ -697,12 +655,6 @@ html.is-framed body {
 }
 
 @media (forced-colors: active) {
-  .lens::before {
-    border: 1px solid Highlight;
-  }
-
-  .w.is-active .w__t,
-  .w.is-active .w__t b,
   .reel__l.is-active {
     color: Highlight;
   }

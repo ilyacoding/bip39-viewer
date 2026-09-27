@@ -29,23 +29,25 @@
   const all = (el, selector) => Array.prototype.slice.call(el.querySelectorAll(selector));
   const now = () => performance.now();
 
-  markFramed();
+  const framed = markFramed();
   try {
     history.scrollRestoration = 'manual';
   } catch (e) { /* not supported: nothing to restore anyway */ }
   const engine = Lib ? createEngine() : null;
   watchVisibility();
   verifyWordlist();
-  registerServiceWorker();
+  // A framed copy is hidden and must not leave a worker and its cache in the framing site's storage.
+  if (!framed) registerServiceWorker();
 
   function markFramed() {
-    let framed;
+    let isFramed;
     try {
-      framed = window.top !== window.self;
+      isFramed = window.top !== window.self;
     } catch (e) {
-      framed = true;
+      isFramed = true;
     }
-    if (framed) root.classList.add('is-framed');
+    if (isFramed) root.classList.add('is-framed');
+    return isFramed;
   }
 
   /* ---------- scroll engine ---------- */
@@ -57,7 +59,6 @@
     if (!N) return null;
 
     const reel = byId('reel');
-    const bits = byId('bits');
     const letters = reel ? all(reel, '.reel__l') : [];
     const L = letters.length;
     // first[k]: index of the first word of letter k, taken from the rendered sections.
@@ -65,8 +66,7 @@
     const withReel = L > 0 && L === first.length && first[0] === 0 &&
       first.every((f, k) => k === 0 || f > first[k - 1]);
 
-    const centers = new Float64Array(N); // list scrollTop that puts word i in the lens
-    const bitsWidth = Math.max(1, Math.ceil(Math.log2(N)));
+    const centers = new Float64Array(N); // list scrollTop that puts word i at the centre
     const dCache = [];
     const frozen = { list: 0, reel: 0 }; // token of the strip's active freeze; 0 = not frozen
     const rested = { list: false, reel: false }; // a strip may have stopped off its place: check
@@ -82,7 +82,6 @@
     let geometryToken = 0;
 
     let S = Lib.createState();
-    let active = -1;
     let activeLetter = -1;
     let reelTarget = -1; // letter the reel was last sent to while following the list
     let reelSeen = 0; // reel letter at the last update: tells a moved reel from a moved list
@@ -224,8 +223,8 @@
       });
     }
 
-    // Puts the list back where it rested before the geometry changed (the same word in the
-    // lens, or the same end), and the reel on that word's letter.
+    // Puts the list back where it rested before the geometry changed (the same word at the
+    // centre, or the same end), and the reel on that word's letter.
     function restoreRest() {
       const t = now();
       if (t - S.lastMove.list < ACTIVE_MS || t - S.lastMove.reel < ACTIVE_MS) return;
@@ -253,16 +252,18 @@
       engage('list');
     }
 
-    function engageReel() {
-      engage('reel');
+    function engageReel(e) {
+      // A wheel has already started scrolling the reel on the compositor when this passive listener
+      // runs; aligning the reel now would cancel that scroll and swallow the first wheel tick.
+      engage('reel', e && e.type === 'wheel');
     }
 
-    function engage(which) {
+    function engage(which, scrolling) {
       thaw(which); // this strip must scroll under the user's finger right away
       const r = Lib.onEngage(S, which, now());
       commit(r.state);
       if (r.freeze) freeze(r.freeze);
-      if (r.settle) settleReel();
+      if (r.settle && !scrolling) settleReel();
       schedule();
     }
 
@@ -334,7 +335,7 @@
       alignReel(Lib.letterOf(Lib.nearestIndex(centers, list.scrollTop), first));
     }
 
-    // Puts letter k in the lens at once (an instant write also cancels a smooth scroll).
+    // Puts letter k at the reel's centre at once (an instant write also cancels a smooth scroll).
     function alignReel(k) {
       const top = reelTopFor(k);
       if (Math.abs(reel.scrollTop - top) >= 0.5) {
@@ -423,7 +424,7 @@
         reelSeen = Lib.clamp(Math.round(pos), 0, L - 1);
       }
 
-      setActive(a);
+      // Nothing marks word a on screen: only the reel shows where the list is.
       // Remember where the list rests, to put it back after a geometry change.
       if (Math.abs(listTop - centers[a]) <= 1) {
         restKind = 'word';
@@ -433,14 +434,6 @@
       } else if (listTop >= maxList - 1) {
         restKind = 'bottom';
       }
-    }
-
-    function setActive(a) {
-      if (a === active) return;
-      if (active >= 0) words[active].classList.remove('is-active');
-      words[a].classList.add('is-active');
-      active = a;
-      if (bits) bits.textContent = Lib.toBits(a, bitsWidth);
     }
 
     function paintReel(pos) {
@@ -476,7 +469,8 @@
 
   /* ---------- privacy ---------- */
 
-  // Blank the page while it is hidden, so app-switcher snapshots show no words (best effort).
+  // Blank the page while it is hidden (best effort). iOS Safari takes its app-switcher snapshot before any
+  // of these events arrive (blur too), so that snapshot still shows the list.
   function watchVisibility() {
     const veil = (on) => root.classList.toggle('is-veiled', on);
     document.addEventListener('visibilitychange', () => veil(document.visibilityState === 'hidden'));

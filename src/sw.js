@@ -34,8 +34,9 @@ self.addEventListener('fetch', (event) => {
     // Network first, so a new deployment is picked up as soon as it is online.
     event.respondWith(
       fetch(request, { cache: 'no-cache' }).then((response) => {
-        // Only the page itself refreshes the offline copy (not e.g. a visit to /sw.js).
-        if (response.ok && response.type === 'basic' && url.pathname === ROOT) {
+        // Only the page itself refreshes the offline copy (not e.g. a visit to /sw.js), and never from a URL
+        // with a query: the cached response keeps its URL, and inbound links carry ids (utm_*, fbclid, gclid).
+        if (response.ok && response.type === 'basic' && url.pathname === ROOT && !url.search) {
           const copy = response.clone();
           event.waitUntil(caches.open(CACHE).then((cache) => cache.put('./', copy)));
         }

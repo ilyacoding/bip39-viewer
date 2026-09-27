@@ -2,7 +2,7 @@ name: Pages
 
 on:
   push:
-    branches: [main, master]
+    branches: [master]
   pull_request:
   workflow_dispatch:
 
@@ -21,7 +21,8 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read # check out the repository
-      pages: read # configure-pages reads the Pages site settings (required on private repositories)
+    outputs:
+      sha256sums: ${{ steps.hash.outputs.sha256sums }}
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -40,9 +41,22 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Configure Pages
-        if: github.event_name != 'pull_request'
-        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      # npm test already builds twice in one process. This rebuild runs in a new process with another time zone
+      # and locale, so output that depends on the environment fails here.
+      - name: Check the build is reproducible
+        run: |
+          mv dist "$RUNNER_TEMP/dist-first"
+          env TZ=Pacific/Chatham LANG=tr_TR.UTF-8 LC_ALL=tr_TR.UTF-8 node scripts/build.mjs --quiet
+          diff -r "$RUNNER_TEMP/dist-first" dist
+
+      # The run summary lists the hashes, so anyone can compare them with the live site.
+      - name: Hash the built files
+        id: hash
+        working-directory: dist
+        run: |
+          sums=$(sha256sum -- *)
+          printf 'sha256sums<<SHA256SUMS_EOF\n%s\nSHA256SUMS_EOF\n' "$sums" >> "$GITHUB_OUTPUT"
+          printf '### sha256 of the built files\n\n```\n%s\n```\n' "$sums" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload Pages artifact
         if: github.event_name != 'pull_request'
@@ -66,3 +80,26 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+
+  # Signed SLSA build provenance for every built file. There is no checkout and no repository code in this job:
+  # it signs the hashes from the build job. Attestations need a public repository (private ones need GitHub
+  # Enterprise Cloud), so a private repository skips this job instead of failing.
+  provenance:
+    name: Attest provenance
+    needs: build
+    if: github.event_name != 'pull_request' && github.event.repository.visibility == 'public'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      id-token: write # OIDC token for the Sigstore signing certificate
+      attestations: write # store the attestation in this repository
+    steps:
+      - name: Write the checksums file
+        env:
+          SHA256SUMS: ${{ needs.build.outputs.sha256sums }}
+        run: printf '%s\n' "$SHA256SUMS" > "$RUNNER_TEMP/sha256sums.txt"
+
+      - name: Attest build provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: ${{ runner.temp }}/sha256sums.txt

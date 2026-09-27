@@ -33,7 +33,7 @@ function bruteNearest(a, v) {
 describe('module shape', () => {
   it('exports a frozen API', () => {
     assert.ok(Object.isFrozen(Lib));
-    for (const name of ['clamp', 'nearestIndex', 'letterOf', 'toBits', 'bytesToHex', 'listText', 'isEcho',
+    for (const name of ['clamp', 'nearestIndex', 'letterOf', 'bytesToHex', 'listText', 'isEcho',
       'createState', 'expectScroll', 'onEngage', 'onFreeze', 'onListScroll', 'onReelScroll', 'reelIndexAt', 'fisheye']) {
       assert.equal(typeof Lib[name], 'function', name);
     }
@@ -140,28 +140,6 @@ describe('letterOf', () => {
     assert.equal(Lib.letterOf(-5, FIRST), 0);
     assert.equal(Lib.letterOf(99999, FIRST), 24);
     assert.equal(Lib.letterOf(3, []), -1);
-  });
-});
-
-describe('toBits', () => {
-  it('renders 11-bit indexes', () => {
-    assert.equal(Lib.toBits(0), '00000000000');
-    assert.equal(Lib.toBits(1), '00000000001');
-    assert.equal(Lib.toBits(1024), '10000000000');
-    assert.equal(Lib.toBits(2047), '11111111111');
-  });
-
-  it('honours the width', () => {
-    assert.equal(Lib.toBits(5, 4), '0101');
-    assert.equal(Lib.toBits(0, 1), '0');
-  });
-
-  it('rejects indexes that do not fit', () => {
-    assert.throws(() => Lib.toBits(2048), RangeError);
-    assert.throws(() => Lib.toBits(-1), RangeError);
-    assert.throws(() => Lib.toBits(1.5), RangeError);
-    assert.throws(() => Lib.toBits(NaN), RangeError);
-    assert.throws(() => Lib.toBits(1, 0), RangeError);
   });
 });
 

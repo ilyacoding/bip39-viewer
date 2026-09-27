@@ -62,17 +62,6 @@
     return lo > 0 ? lo - 1 : 0;
   }
 
-  /** Zero-padded binary of a word index (BIP39 indexes are 11 bits). */
-  function toBits(index, width = 11) {
-    if (!Number.isInteger(width) || width < 1 || width > 52) {
-      throw new RangeError('toBits: width must be an integer from 1 to 52');
-    }
-    if (!Number.isInteger(index) || index < 0 || index >= 2 ** width) {
-      throw new RangeError('toBits: index must be an integer from 0 to 2^width - 1');
-    }
-    return index.toString(2).padStart(width, '0');
-  }
-
   /** Lowercase hex of an ArrayBuffer, a typed array/Buffer, or an array of byte values. */
   function bytesToHex(bytes) {
     const u8 = ArrayBuffer.isView(bytes) ? new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength)
@@ -212,7 +201,7 @@
 
   /* ---------- reel geometry ---------- */
 
-  /** Letter nearest the lens for a reel scrollTop (letter k is centred at base + k * notch); -1 if unknown. */
+  /** Letter nearest the reel's centre for a reel scrollTop (letter k is centred at base + k * notch); -1 if unknown. */
   function reelIndexAt(scrollTop, notch, count, base = 0) {
     if (!(notch > 0) || !(count > 0)) return -1;
     return clamp(Math.round((scrollTop - base) / notch), 0, count - 1);
@@ -232,7 +221,6 @@
     clamp: clamp,
     nearestIndex: nearestIndex,
     letterOf: letterOf,
-    toBits: toBits,
     bytesToHex: bytesToHex,
     listText: listText,
     isEcho: isEcho,

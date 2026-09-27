@@ -13,6 +13,7 @@ import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import vm from 'node:vm';
 
 import {
   assertSafeOutDir, build, buildCsp, computeVersion, fillTemplate, groupHex, renderList, renderReel,
@@ -260,6 +261,19 @@ describe('build helpers', () => {
     const csp = buildCsp('a{}', 'var x;');
     assert.ok(csp.includes(`script-src 'sha256-${b64('var x;')}'`));
     assert.ok(csp.includes(`style-src 'sha256-${b64('a{}')}'`));
+  });
+
+  test('buildCsp() has no reporting endpoint, no unsafe-* or broad sources, nothing a <meta> policy ignores', () => {
+    const directives = buildCsp('a{}', 'var x;').split('; ').map((d) => d.split(' '));
+    const names = directives.map(([name]) => name);
+    // A violation report would be a request that tracks; frame-ancestors and sandbox do nothing in a <meta>.
+    for (const name of ['report-uri', 'report-to', 'frame-ancestors', 'sandbox']) assert.ok(!names.includes(name), name);
+    for (const [name, ...sources] of directives) {
+      for (const source of sources) {
+        assert.doesNotMatch(source, /^'unsafe-|\*|^(?:https?|wss?|data|blob|filesystem):?$/i, `${name} ${source}`);
+      }
+    }
+    assert.equal(new Set(names).size, names.length, 'no directive twice (a browser would use only the first)');
   });
 
   test('renderList() produces the spec markup', () => {
@@ -623,6 +637,145 @@ describe('output directory safety', () => {
 });
 
 // ---------------------------------------------------------------------------------------------------------------
+// dist/sw.js behaviour: the real src/sw.js, rendered by the build and run in a vm with fake caches and network
+
+const SW_ORIGIN = 'https://bip39.uuid.me';
+const SW_ASSETS = ['./', 'favicon.svg', 'manifest.webmanifest'];
+const SW_CACHE = 'bip39-0123456789ab';
+
+const fakeResponse = (url, { status = 200, type = 'basic' } = {}) =>
+  ({ url, status, type, ok: status >= 200 && status < 300, clone() { return { ...this }; } });
+
+/** Loads the worker; `network(url)` answers every fetch (throw to be offline). `stores` seeds Cache Storage. */
+async function loadWorker(network, stores = {}) {
+  const source = (await fs.readFile(path.join(REPO, 'src', 'sw.js'), 'utf8')).replace(/\r\n?/g, '\n');
+  const code = renderServiceWorker(source, SW_CACHE.slice('bip39-'.length), SW_ASSETS);
+  const abs = (target) => new URL(typeof target === 'string' ? target : target.url, `${SW_ORIGIN}/sw.js`).href;
+  const caches = new Map(Object.entries(stores).map(([name, entries]) => [name, new Map(Object.entries(entries))]));
+  const calls = [];
+  const handlers = {};
+  const fetch = async (request, init) => {
+    calls.push(['fetch', abs(request), init?.cache ?? request.cache]);
+    return network(abs(request));
+  };
+  const cacheStorage = {
+    async open(name) {
+      if (!caches.has(name)) caches.set(name, new Map());
+      const cache = caches.get(name);
+      return {
+        async addAll(requests) {
+          for (const r of requests) cache.set(abs(r), await fetch(r));
+        },
+        async put(key, res) {
+          calls.push(['put', name, abs(key), res.url]);
+          cache.set(abs(key), res);
+        },
+      };
+    },
+    keys: async () => [...caches.keys()],
+    delete: async (name) => caches.delete(name),
+    async match(key) {
+      for (const cache of caches.values()) if (cache.has(abs(key))) return cache.get(abs(key));
+      return undefined;
+    },
+  };
+  class Request {
+    constructor(url, init = {}) {
+      this.url = abs(url);
+      this.cache = init.cache;
+    }
+  }
+  const self = {
+    location: new URL(`${SW_ORIGIN}/sw.js`),
+    addEventListener: (type, fn) => { handlers[type] = fn; },
+    skipWaiting: () => calls.push(['skipWaiting']),
+    clients: { claim: () => calls.push(['claim']) },
+  };
+  vm.runInNewContext(code, { self, caches: cacheStorage, fetch, Request, Response: { error: () => ({ type: 'error' }) }, URL });
+  const lifecycle = async (type) => {
+    const waits = [];
+    handlers[type]({ waitUntil: (p) => waits.push(p) });
+    await Promise.all(waits);
+  };
+  /** Dispatches a fetch event; resolves to the response the worker gave, or null when it let the browser handle it. */
+  const dispatch = async (url, { method = 'GET', mode = 'no-cors' } = {}) => {
+    let responded = null;
+    const waits = [];
+    handlers.fetch({ request: { url, method, mode }, respondWith: (p) => { responded = p; }, waitUntil: (p) => waits.push(p) });
+    const res = responded === null ? null : await responded;
+    await Promise.all(waits);
+    return res;
+  };
+  return { caches, calls, lifecycle, dispatch };
+}
+
+describe('dist/sw.js behaviour', () => {
+  const online = (url) => fakeResponse(url);
+  const offline = () => { throw new TypeError('Failed to fetch'); };
+  const puts = (w) => w.calls.filter(([kind]) => kind === 'put');
+
+  test('install precaches the asset list revalidated with the server, then takes over', async () => {
+    const w = await loadWorker(online);
+    await w.lifecycle('install');
+    assert.deepEqual(w.calls.filter(([kind]) => kind === 'fetch'), SW_ASSETS.map((a) => ['fetch', new URL(a, `${SW_ORIGIN}/`).href, 'no-cache']));
+    assert.deepEqual([...w.caches.keys()], [SW_CACHE]);
+    assert.deepEqual(w.calls.at(-1), ['skipWaiting']);
+  });
+
+  test('activate deletes only older bip39- caches, then claims the page', async () => {
+    const w = await loadWorker(online, { 'bip39-000000000000': {}, [SW_CACHE]: {}, 'someone-else': {} });
+    await w.lifecycle('activate');
+    assert.deepEqual([...w.caches.keys()].sort(), [SW_CACHE, 'someone-else']);
+    assert.deepEqual(w.calls.at(-1), ['claim']);
+  });
+
+  test('leaves non-GET and cross-origin requests to the browser', async () => {
+    const w = await loadWorker(online);
+    assert.equal(await w.dispatch(`${SW_ORIGIN}/`, { method: 'POST', mode: 'navigate' }), null);
+    assert.equal(await w.dispatch('https://example.com/x.png'), null);
+    assert.equal(await w.dispatch('https://bip39.uuid.me.example.com/'), null);
+    assert.deepEqual(w.calls, []);
+  });
+
+  test('a navigation to the page refreshes the offline copy, network first', async () => {
+    const w = await loadWorker(online);
+    const res = await w.dispatch(`${SW_ORIGIN}/`, { mode: 'navigate' });
+    assert.equal(res.url, `${SW_ORIGIN}/`);
+    assert.deepEqual(w.calls, [['fetch', `${SW_ORIGIN}/`, 'no-cache'], ['put', SW_CACHE, `${SW_ORIGIN}/`, `${SW_ORIGIN}/`]]);
+  });
+
+  test('never stores a URL with a query, another path, an error or a non-basic response', async () => {
+    const answers = {
+      [`${SW_ORIGIN}/?fbclid=IwAR0abc&utm_source=x`]: fakeResponse(`${SW_ORIGIN}/?fbclid=IwAR0abc&utm_source=x`),
+      [`${SW_ORIGIN}/sw.js`]: fakeResponse(`${SW_ORIGIN}/sw.js`),
+      [`${SW_ORIGIN}/`]: fakeResponse(`${SW_ORIGIN}/`, { status: 404 }),
+    };
+    const w = await loadWorker((url) => answers[url]);
+    for (const url of Object.keys(answers)) assert.equal((await w.dispatch(url, { mode: 'navigate' })).url, url);
+    const w2 = await loadWorker((url) => fakeResponse(url, { type: 'cors' }));
+    await w2.dispatch(`${SW_ORIGIN}/`, { mode: 'navigate' });
+    assert.deepEqual([...puts(w), ...puts(w2)], []);
+  });
+
+  test('offline, a navigation gets the stored page, or a network error when there is none', async () => {
+    const page = fakeResponse(`${SW_ORIGIN}/`);
+    const w = await loadWorker(offline, { [SW_CACHE]: { [`${SW_ORIGIN}/`]: page } });
+    assert.equal(await w.dispatch(`${SW_ORIGIN}/?utm_source=x`, { mode: 'navigate' }), page);
+    const empty = await loadWorker(offline);
+    assert.deepEqual(await empty.dispatch(`${SW_ORIGIN}/`, { mode: 'navigate' }), { type: 'error' });
+  });
+
+  test('other requests: cache first, then the network, and nothing new is stored', async () => {
+    const icon = fakeResponse(`${SW_ORIGIN}/favicon.svg`);
+    const w = await loadWorker(online, { [SW_CACHE]: { [`${SW_ORIGIN}/favicon.svg`]: icon } });
+    assert.equal(await w.dispatch(`${SW_ORIGIN}/favicon.svg`), icon);
+    assert.deepEqual(w.calls, []);
+    assert.equal((await w.dispatch(`${SW_ORIGIN}/robots.txt`)).url, `${SW_ORIGIN}/robots.txt`);
+    assert.deepEqual(w.calls, [['fetch', `${SW_ORIGIN}/robots.txt`, undefined]]);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------
 // scripts/serve.mjs
 
 function request(url, rawPath, method = 'GET') {
@@ -769,6 +922,10 @@ describe('the real repo', () => {
     const cssCode = page.style.replace(/\/\*[\s\S]*?\*\//g, '');
     assert.doesNotMatch(cssCode, /@import/i, 'no @import');
     assert.doesNotMatch(cssCode, /url\(\s*["']?\s*(?:https?:|\/\/)/i, 'no external url()');
+    // Nothing on screen tells which word is at the centre (screen recordings, shoulder surfers): no lens band, no
+    // bits readout, no style that singles out a word row. Only the letter reel marks its centre letter.
+    assert.doesNotMatch(page.skeleton, /class="lens|id="bits"/, 'no lens band or bits readout');
+    assert.doesNotMatch(cssCode, /\.lens\b|#bits\b|\.w(?:--g|__[nt])?(?:\.is-|\[|:hover|:focus|:active)/, 'no style for a marked word row');
     checkNoForbidden(page.skeleton);
     assert.equal(parseList(page.skeleton).length, 25);
     checkList(page.skeleton, WORDS);
