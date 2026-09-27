@@ -3,6 +3,7 @@
   The JS measures this layout, so these are load-bearing:
     .w row = var(--row) 48px, .head = var(--head) 72px, .reel__l = var(--notch) 56px, reel = var(--reel-w) 56px.
     .list / .sec / .words / .w carry no vertical margin, padding or border, and no scroller has snap padding.
+    .mark mirrors the reel's edge and the track's 8px margin, and JS reads .reel__track's border-radius.
   Plain CSS: no imports, no external resources, no web fonts. System font stacks only.
 */
 
@@ -44,6 +45,9 @@
   --num: 34px;       /* index column (right-aligned) */
   --gap: 14px;       /* index -> word */
   --clear: calc(var(--reel-w) + 12px);   /* right padding that keeps rows clear of the reel */
+  /* right edge of the reel strip: safe area + the centred column's leftover. .mark shares it. */
+  --reel-right: calc(env(safe-area-inset-right, 0px)
+    + max(0px, (100% - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px) - var(--col)) / 2));
   --fade-t: 40px;    /* top edge fade (plus safe area) */
   --fade-b: 48px;    /* bottom edge fade (plus safe area) */
 
@@ -389,8 +393,7 @@ b {
   z-index: 2;
   top: 0;
   bottom: 0;
-  right: calc(env(safe-area-inset-right, 0px)
-    + max(0px, (100% - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px) - var(--col)) / 2));
+  right: var(--reel-right);
   width: var(--reel-w);
   padding: 0;
   overflow-x: hidden;
@@ -400,10 +403,6 @@ b {
   scroll-behavior: auto;
   scrollbar-width: none;
   outline: none;
-  /* window behind the centre letter: a scroller's own background stays put while its content scrolls,
-     so the marker never leaves the reel */
-  background: linear-gradient(var(--mark-edge) 1px, var(--mark-fill) 1px calc(100% - 1px), var(--mark-edge) calc(100% - 1px))
-    center / calc(100% - 16px) var(--notch) no-repeat;
 }
 
 .reel::-webkit-scrollbar {
@@ -419,7 +418,8 @@ b {
   height: calc(50% - var(--notch) / 2);
 }
 
-.no-js .reel {
+.no-js .reel,
+.no-js .mark {
   display: none;
 }
 
@@ -454,6 +454,26 @@ b {
 .reel__l.is-active {
   --d: 0;
   color: var(--accent);
+}
+
+/* window behind the centre letter: fixed like the reel and layered just under it, so the marker
+   never scrolls and the track passes through it. JS keeps its box hugging the track (--mk-*):
+   square between the ends, rounded to the track's own pill radius while an end of the track sits
+   in the window, and trimmed while rubber-banding carries the track past it. */
+.mark {
+  position: fixed;
+  z-index: 1;
+  top: calc(50% - var(--notch) / 2);
+  right: calc(var(--reel-right) + 8px);   /* the track's 8px margin inside the reel */
+  width: calc(var(--reel-w) - 16px);
+  height: calc(var(--notch) - var(--mk-clip, 0px));
+  transform: translateY(var(--mk-y, 0px));
+  border: solid var(--mark-edge);
+  border-width: 1px 0;
+  border-radius: var(--mk-rt, 0) var(--mk-rt, 0) var(--mk-rb, 0) var(--mk-rb, 0);
+  background: var(--mark-fill);
+  background-clip: padding-box;   /* keep the fill out of the translucent hairlines */
+  pointer-events: none;
 }
 
 /* ---------- edge fades ---------- */

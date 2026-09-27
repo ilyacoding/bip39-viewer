@@ -60,6 +60,8 @@
 
     const reel = byId('reel');
     const letters = reel ? all(reel, '.reel__l') : [];
+    const track = byId('reelTrack');
+    const mark = byId('mark');
     const L = letters.length;
     // first[k]: index of the first word of letter k, taken from the rendered sections.
     const first = all(list, '.sec').map((sec) => words.indexOf(sec.querySelector('.w')));
@@ -77,6 +79,8 @@
     let reelBase = 0; // reel scrollTop that centres letter 0 (0 under the CSS contract)
     let maxReel = 0;
     let dMax = 0; // letters farther away are off-screen; their --d stays pinned
+    let capR = 0; // the track's pill radius; the marker rounds to it at the track's ends
+    let markKey = ''; // last --mk-* values written to the marker
     let sizeKey = '';
     let geometryDirty = false; // the viewport changed; positions are in flux until remeasure()
     let geometryToken = 0;
@@ -169,6 +173,7 @@
       maxReel = Math.max(0, reel.scrollHeight - h);
       dMax = Math.ceil(h / 2 / notch) + 2;
       dCache.length = 0;
+      capR = track ? parseFloat(window.getComputedStyle(track).borderTopLeftRadius) || 0 : 0;
     }
 
     // Letter centre in reel content coordinates. offsetTop ignores the fisheye transforms.
@@ -450,6 +455,24 @@
         letters[k].classList.add('is-active');
         activeLetter = k;
       }
+      if (!mark) return;
+      // Marker box, from pos alone: square between the ends, rounded to the track's pill radius
+      // while an end of the track sits in the window, trimmed while rubber-banding carries the
+      // track past it. Quarter-px values, so at rest the strings repeat and nothing is written.
+      const past = reelBase + pos * notch; // reel scrollTop: px past the first notch
+      const short = maxReel - past; // px short of the last notch
+      const q = (v) => Math.round(v * 4) / 4;
+      const rt = q(Lib.clamp(capR - past, 0, capR));
+      const rb = q(Lib.clamp(capR - short, 0, capR));
+      const cut = q(Math.max(0, -past));
+      const clip = q(cut + Math.max(0, -short));
+      const key = rt + '/' + rb + '/' + cut + '/' + clip;
+      if (key === markKey) return;
+      markKey = key;
+      mark.style.setProperty('--mk-rt', rt + 'px');
+      mark.style.setProperty('--mk-rb', rb + 'px');
+      mark.style.setProperty('--mk-y', cut + 'px');
+      mark.style.setProperty('--mk-clip', clip + 'px');
     }
 
     // Back/forward cache: a returning visit starts at "abandon" like any other.
